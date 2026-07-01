@@ -1,34 +1,48 @@
-import { useEffect, useState } from 'react'
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { useEffect, useMemo, useState } from 'react'
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Award, BarChart3, Brain, ClipboardCheck, Target, TrendingUp } from 'lucide-react'
+import Badge from '../components/Badge'
+import DashboardCard from '../components/DashboardCard'
+import DataTable from '../components/DataTable'
 import EmptyState from '../components/EmptyState'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PageHeader from '../components/PageHeader'
+import ProgressBar from '../components/ProgressBar'
 import StatCard from '../components/StatCard'
 import api from '../services/api'
+import {
+  categoryVariant,
+  clampPercent,
+  formatDate,
+  formatNumber,
+  formatPercent,
+  masteryVariant,
+  normalizeList,
+  priorityVariant,
+  scoreVariant,
+} from '../utils/formatters'
 
-const categoryBadge = (category) => {
-  if (!category) return <span className="badge badge-info">Not calculated yet</span>
-  if (category === 'Advanced Student') return <span className="badge badge-success">Advanced Student</span>
-  if (category === 'Good Student') return <span className="badge badge-primary">Good Student</span>
-  if (category === 'Average Student') return <span className="badge badge-warning">Average Student</span>
-  if (category === 'Weak Student') return <span className="badge badge-warning">Weak Student</span>
-  if (category === 'At-Risk Student') return <span className="badge badge-danger">At-Risk Student</span>
-  return <span className="badge badge-info">{category}</span>
-}
-
-const scoreClass = (percentage) => {
-  if (percentage === null || percentage === undefined) return ''
-  if (percentage >= 85) return 'badge-success'
-  if (percentage >= 70) return 'badge-primary'
-  if (percentage >= 55) return 'badge-warning'
-  if (percentage >= 40) return 'badge-warning'
-  return 'badge-danger'
-}
-
-const masteryClass = (status) => {
-  if (status === 'strong') return 'badge-success'
-  if (status === 'moderate') return 'badge-warning'
-  return 'badge-danger'
+function normalizeRecommendation(item, index) {
+  if (typeof item === 'string') {
+    const lower = item.toLowerCase()
+    const priority = lower.includes('high') ? 'high' : lower.includes('medium') ? 'medium' : lower.includes('low') ? 'low' : 'medium'
+    return {
+      id: `legacy-${index}`,
+      title: item,
+      description: 'Adaptive learning recommendation generated from your latest assessment profile.',
+      recommendation_type: 'Learning guidance',
+      priority,
+      next_action: 'Review this topic and attempt additional practice.',
+    }
+  }
+  return {
+    id: item.id ?? `${item.topic_id}-${index}`,
+    title: item.title || 'Learning recommendation',
+    description: item.description || 'Personalized guidance based on your latest assessment.',
+    recommendation_type: item.recommendation_type || 'Adaptive recommendation',
+    priority: item.priority || 'medium',
+    next_action: item.next_action || 'Continue with targeted revision.',
+  }
 }
 
 export default function StudentDashboard() {
@@ -38,47 +52,65 @@ export default function StudentDashboard() {
   const [recommendations, setRecommendations] = useState([])
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(true)
+  const [errors, setErrors] = useState([])
 
   useEffect(() => {
     const load = async () => {
-      try {
-        const [overviewRes, progressRes, masteryRes, resultsRes] = await Promise.all([
-          api.get('/dashboard/student/overview'),
-          api.get('/dashboard/student/progress'),
-          api.get('/topic-mastery/my-mastery'),
-          api.get('/assessments/my-results'),
-        ])
-        setOverview(overviewRes.data)
-        setProgress(progressRes.data)
-        setMastery(masteryRes.data)
-        setRecommendations(overviewRes.data?.recommendations || [])
-        setResults(resultsRes.data)
-      } catch (error) {
-        console.error(error)
-      } finally {
-        setLoading(false)
+      const requests = await Promise.allSettled([
+        api.get('/dashboard/student/overview'),
+        api.get('/dashboard/student/progress'),
+        api.get('/topic-mastery/my-mastery'),
+        api.get('/recommendations/my-recommendations'),
+        api.get('/assessments/my-results'),
+      ])
+
+      const nextErrors = []
+      const [overviewRes, progressRes, masteryRes, recommendationsRes, resultsRes] = requests
+
+      if (overviewRes.status === 'fulfilled') setOverview(overviewRes.value.data)
+      else nextErrors.push('Overview metrics are temporarily unavailable.')
+
+      if (progressRes.status === 'fulfilled') setProgress(normalizeList(progressRes.value.data))
+      else nextErrors.push('Performance trend could not be loaded.')
+
+      if (masteryRes.status === 'fulfilled') setMastery(normalizeList(masteryRes.value.data))
+      else nextErrors.push('Topic mastery could not be loaded.')
+
+      if (recommendationsRes.status === 'fulfilled') {
+        setRecommendations(normalizeList(recommendationsRes.value.data))
+      } else if (overviewRes.status === 'fulfilled') {
+        setRecommendations(normalizeList(overviewRes.value.data?.recommendations))
+      } else {
+        nextErrors.push('Recommendations could not be loaded.')
       }
+
+      if (resultsRes.status === 'fulfilled') setResults(normalizeList(resultsRes.value.data))
+      else nextErrors.push('Recent results could not be loaded.')
+
+      setErrors(nextErrors)
+      setLoading(false)
     }
 
     load()
   }, [])
 
-  if (loading) {
-    return <div className="page"><div className="card"><LoadingSpinner label="Loading your personalized dashboard…" /></div></div>
-  }
+  const chartData = useMemo(() => progress.map((item) => ({
+    label: `S${item.session_id}`,
+    score: Number(item.percentage || 0),
+  })), [progress])
 
-  const chartData = progress.map((item) => ({
-    label: `Session ${item.session_id}`,
-    score: item.percentage || 0,
-  }))
-
-  const sortedMastery = [...mastery].sort((a, b) => {
+  const sortedMastery = useMemo(() => {
     const order = { weak: 0, moderate: 1, strong: 2 }
-    return (order[a.status] ?? 99) - (order[b.status] ?? 99)
-  })
+    return [...mastery].sort((a, b) => (order[a.status] ?? 99) - (order[b.status] ?? 99))
+  }, [mastery])
 
-  const formattedAverage = overview?.average_percentage !== null && overview?.average_percentage !== undefined ? Number(overview.average_percentage).toFixed(1) : '0.0'
-  const latestCategory = overview?.latest_category || null
+  const latestCategory = overview?.latest_category || ''
+  const latestAlwe = overview?.latest_alwe_score
+  const recommendationCards = recommendations.map(normalizeRecommendation)
+
+  if (loading) {
+    return <div className="page"><DashboardCard><LoadingSpinner label="Loading your personalized dashboard..." /></DashboardCard></div>
+  }
 
   return (
     <div className="page">
@@ -88,113 +120,109 @@ export default function StudentDashboard() {
         subtitle="Your adaptive learning path is updated based on your latest assessment performance."
       />
 
+      {errors.length > 0 && (
+        <div className="card error-card">
+          Some dashboard sections could not refresh. Available data is still shown below.
+        </div>
+      )}
+
       <div className="card hero-card">
         <div className="row-between">
           <div>
-            <h3>Welcome back, {localStorage.getItem('student_name') || 'Student'}</h3>
-            <p className="page-subtitle">Latest assessment insights are surfaced below for your review and revision planning.</p>
+            <p className="eyebrow">Adaptive study profile</p>
+            <h2>Welcome back, {localStorage.getItem('student_name') || 'Student'}</h2>
+            <p className="page-subtitle">ALWE scoring, topic mastery, and recommendations update after every completed assessment.</p>
           </div>
-          {categoryBadge(latestCategory)}
+          <Badge variant={categoryVariant(latestCategory)}>{latestCategory || 'Not calculated yet'}</Badge>
         </div>
       </div>
 
       <div className="stats-grid">
-        <StatCard icon="🧪" label="Assessments completed" value={overview?.total_assessments_completed ?? 0} hint="Across all completed sessions" />
-        <StatCard icon="📈" label="Average performance" value={`${formattedAverage}%`} hint="Rounded to one decimal place" />
-        <StatCard icon="🧠" label="Latest ALWE score" value={overview?.latest_alwe_score ?? 0} hint="Adaptive learning profile score" />
-        <StatCard icon="🏷️" label="Latest category" value={latestCategory || 'Not calculated yet'} hint="Current learning classification" />
-      </div>
-
-      <div className="content-grid">
-        <div className="card chart-card">
-          <div className="row-between" style={{ marginBottom: 12 }}>
-            <h3>Performance trend</h3>
-            <span className="badge badge-info">Assessment sessions</span>
-          </div>
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData}>
-                <CartesianGrid stroke="#eef2ff" />
-                <XAxis dataKey="label" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="score" stroke="#4f46e5" strokeWidth={3} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : <EmptyState title="No assessment history yet." description="Complete a quiz to see your progress trend." />}
-        </div>
-
-        <div className="card">
-          <div className="row-between" style={{ marginBottom: 12 }}>
-            <h3>Recommended next steps</h3>
-            <span className="badge badge-danger">Latest recommendations</span>
-          </div>
-          {recommendations.length > 0 ? (
-            <ul className="stack-list">
-              {recommendations.map((item, index) => (
-                <li key={`${item}-${index}`} className={`recommendation-card ${item.includes('high:') ? 'high-priority' : item.includes('medium:') ? 'medium-priority' : 'low-priority'}`}>
-                  <strong>{item}</strong>
-                </li>
-              ))}
-            </ul>
-          ) : <EmptyState title="No recommendations available yet." description="Your adaptive study guidance will appear after assessment completion." />}
-        </div>
+        <StatCard icon={<ClipboardCheck size={21} />} label="Assessments Completed" value={overview?.total_assessments_completed ?? 0} hint="Across completed sessions" />
+        <StatCard icon={<TrendingUp size={21} />} label="Average Performance" value={formatPercent(overview?.average_percentage, 'Not calculated yet')} hint="Rounded to one decimal place" />
+        <StatCard icon={<Brain size={21} />} label="Latest ALWE Score" value={formatNumber(latestAlwe, 'Not calculated yet')} hint="Adaptive learning profile score" />
+        <StatCard icon={<Award size={21} />} label="Latest Category" value={latestCategory || 'Not calculated yet'} hint="Current learning classification" />
       </div>
 
       <div className="content-grid two-col">
-        <div className="card">
-          <h3>Topic mastery</h3>
+        <DashboardCard title="Performance Trend" action={<Badge variant="info">Assessment sessions</Badge>} className="chart-card">
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={chartData} margin={{ top: 8, right: 14, left: -16, bottom: 4 }}>
+                <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="4 4" />
+                <XAxis dataKey="label" tick={{ fill: 'var(--chart-text)', fontSize: 12 }} />
+                <YAxis domain={[0, 100]} tick={{ fill: 'var(--chart-text)', fontSize: 12 }} />
+                <Tooltip
+                  formatter={(value) => [formatPercent(value), 'Score']}
+                  contentStyle={{ background: 'var(--tooltip-bg)', borderColor: 'var(--tooltip-border)', color: 'var(--text-primary)', borderRadius: 12 }}
+                  labelStyle={{ color: 'var(--text-primary)' }}
+                  itemStyle={{ color: 'var(--text-primary)' }}
+                />
+                <Line type="monotone" dataKey="score" stroke="var(--primary)" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : <EmptyState title="No progress data available yet" description="Complete a quiz to see your assessment trend." />}
+        </DashboardCard>
+
+        <DashboardCard title="Recommendations" action={<Badge variant="danger">Latest guidance</Badge>}>
+          {recommendationCards.length > 0 ? (
+            <ul className="stack-list">
+              {recommendationCards.map((item) => {
+                const priority = String(item.priority || '').toLowerCase()
+                return (
+                  <li key={item.id} className={`recommendation-card ${priority}-priority`}>
+                    <div className="row-between">
+                      <strong>{item.title}</strong>
+                      <Badge variant={priorityVariant(priority)}>{priority || 'medium'}</Badge>
+                    </div>
+                    <p className="page-subtitle">{item.description}</p>
+                    <div className="row-between" style={{ marginTop: 10 }}>
+                      <Badge variant="neutral">{item.recommendation_type}</Badge>
+                      <span className="stat-hint">{item.next_action}</span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : <EmptyState title="No recommendations available yet" description="Your adaptive study guidance will appear after assessment completion." />}
+        </DashboardCard>
+      </div>
+
+      <div className="content-grid two-col">
+        <DashboardCard title="Topic Mastery" action={<Target size={20} color="var(--primary)" />}>
           {sortedMastery.length > 0 ? (
             <ul className="stack-list">
-              {sortedMastery.map((item) => (
-                <li key={item.id}>
-                  <div className="row-between">
-                    <strong>Topic {item.topic_id}</strong>
-                    <span className={`badge ${masteryClass(item.status)}`}>{item.status}</span>
-                  </div>
-                  <div className="progress-shell" style={{ marginTop: 8 }}>
-                    <div className={`progress-fill ${item.status === 'weak' ? 'danger' : item.status === 'moderate' ? 'warning' : 'success'}`} style={{ width: `${Math.max(0, Math.min(100, item.mastery_percentage || 0))}%` }} />
-                  </div>
-                  <div className="row-between" style={{ marginTop: 8 }}>
-                    <span className="stat-hint">Mastery</span>
-                    <strong>{item.mastery_percentage?.toFixed(1)}%</strong>
-                  </div>
-                </li>
-              ))}
+              {sortedMastery.map((item) => {
+                const variant = masteryVariant(item.status)
+                return (
+                  <li key={item.id || item.topic_id}>
+                    <div className="row-between">
+                      <strong>{item.topic_name || `Topic ${item.topic_id}`}</strong>
+                      <Badge variant={variant}>{item.status || 'unknown'}</Badge>
+                    </div>
+                    <ProgressBar value={clampPercent(item.mastery_percentage)} variant={variant} label="Mastery" />
+                    <p className="stat-hint">{item.correct_answers ?? 0} of {item.total_questions ?? 0} questions correct</p>
+                  </li>
+                )
+              })}
             </ul>
-          ) : <EmptyState title="No topic mastery calculated yet." description="Topic mastery will appear once an assessment is completed." />}
-        </div>
+          ) : <EmptyState title="No topic mastery calculated yet" description="Topic mastery will appear once an assessment is completed." />}
+        </DashboardCard>
 
-        <div className="card">
-          <h3>Recent results</h3>
-          {results.length > 0 ? (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Session</th>
-                    <th>Quiz</th>
-                    <th>Score</th>
-                    <th>Status</th>
-                    <th>Completed at</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.id}</td>
-                      <td>{item.quiz_id}</td>
-                      <td><span className={`badge ${scoreClass(item.percentage)}`}>{item.percentage?.toFixed(1)}%</span></td>
-                      <td>{item.completed_at ? 'Completed' : 'In progress'}</td>
-                      <td>{item.completed_at ? new Date(item.completed_at).toLocaleString() : 'Not available'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : <EmptyState title="No recent results yet." description="Your latest quiz attempts will appear here." />}
-        </div>
+        <DashboardCard title="Recent Results" action={<BarChart3 size={20} color="var(--primary)" />}>
+          <DataTable
+            data={results}
+            emptyTitle="No recent results yet"
+            emptyDescription="Your latest quiz attempts will appear here."
+            columns={[
+              { key: 'session', header: 'Session', render: (item) => item.id },
+              { key: 'quiz', header: 'Quiz', render: (item) => item.quiz_id },
+              { key: 'score', header: 'Score', render: (item) => <Badge variant={scoreVariant(item.percentage)}>{formatPercent(item.percentage, '0.0%')}</Badge> },
+              { key: 'status', header: 'Status', render: (item) => <Badge variant={item.completed_at ? 'success' : 'neutral'}>{item.completed_at ? 'Completed' : 'In progress'}</Badge> },
+              { key: 'completed_at', header: 'Completed At', render: (item) => formatDate(item.completed_at) },
+            ]}
+          />
+        </DashboardCard>
       </div>
     </div>
   )

@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { BarChart3, Brain, ClipboardCheck, Sparkles, Target } from 'lucide-react'
+import ThemeToggle from '../components/ThemeToggle'
 import api from '../services/api'
+
+const features = [
+  { icon: ClipboardCheck, label: 'Adaptive assessments' },
+  { icon: Brain, label: 'ALWE-based student classification' },
+  { icon: BarChart3, label: 'Topic mastery analytics' },
+  { icon: Target, label: 'Personalized recommendations' },
+]
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -38,7 +47,7 @@ export default function LoginPage() {
       } else {
         navigate('/student')
       }
-    } catch (err) {
+    } catch {
       setError('Login failed. Check your credentials.')
     } finally {
       setLoading(false)
@@ -47,23 +56,37 @@ export default function LoginPage() {
 
   return (
     <div className="auth-page">
+      <div className="auth-theme-toggle">
+        <ThemeToggle />
+      </div>
       <div className="auth-shell">
-        <div className="auth-hero">
+        <section className="auth-hero">
           <div>
             <p className="eyebrow">Final Year Research Prototype</p>
             <h1>AEL-Edu</h1>
             <h2>AI-Powered Adaptive Learning Management System</h2>
-            <p style={{ marginTop: 10, color: '#cbd5e1' }}>Multi-factor competency assessment and emotion-aware learning analytics for adaptive education research.</p>
+            <p className="auth-hero-copy">Personalized learning analytics using ALWE, topic mastery, and adaptive recommendations.</p>
           </div>
-          <ul>
-            <li>Adaptive assessments</li>
-            <li>ALWE-based student classification</li>
-            <li>Personalized learning recommendations</li>
-          </ul>
-        </div>
-        <div className="auth-card">
-          <h2>Welcome back</h2>
-          <p className="page-subtitle">Sign in to continue to your research dashboard.</p>
+          <div className="feature-grid">
+            {features.map((feature) => {
+              const Icon = feature.icon
+              return (
+                <div key={feature.label} className="feature-card">
+                  <Icon size={20} />
+                  <span>{feature.label}</span>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="auth-card">
+          <div>
+            <p className="eyebrow"><Sparkles size={13} /> Research dashboard access</p>
+            <h2>Welcome back</h2>
+            <p className="page-subtitle">Use demo accounts to explore prototype dashboards.</p>
+          </div>
+
           <form onSubmit={handleSubmit}>
             <label>
               Email
@@ -74,9 +97,10 @@ export default function LoginPage() {
               <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
             </label>
             {error && <div className="error-card">{error}</div>}
-            <button className="btn-primary" type="submit" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</button>
+            <button className="btn-primary" type="submit" disabled={loading}>{loading ? 'Signing in...' : 'Login'}</button>
           </form>
-          <div className="demo-box" style={{ marginTop: 16 }}>
+
+          <div className="demo-box">
             <strong>Demo accounts</strong>
             <div style={{ marginTop: 8 }}>
               <div>Student: student@aeledu.com / 123456</div>
@@ -84,7 +108,7 @@ export default function LoginPage() {
               <div>Admin: admin@aeledu.com / 123456</div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   )

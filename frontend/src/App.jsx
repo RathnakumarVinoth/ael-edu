@@ -1,7 +1,7 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
 import ProtectedRoute from './components/ProtectedRoute'
-import Sidebar from './components/Sidebar'
+import MainLayout from './layouts/MainLayout'
 import AdminDashboard from './pages/AdminDashboard'
 import CourseManagement from './pages/CourseManagement'
 import LecturerDashboard from './pages/LecturerDashboard'
@@ -12,17 +12,6 @@ import StudentDashboard from './pages/StudentDashboard'
 import StudentQuizAttempt from './pages/StudentQuizAttempt'
 import StudentResults from './pages/StudentResults'
 import TopicManagement from './pages/TopicManagement'
-
-function DashboardLayout() {
-  return (
-    <div className="app-shell">
-      <Sidebar />
-      <main className="main-panel">
-        <Outlet />
-      </main>
-    </div>
-  )
-}
 
 function HomeRedirect() {
   const role = localStorage.getItem('role') || 'student'
@@ -35,7 +24,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+        <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/student" element={<StudentDashboard />} />
           <Route path="/lecturer" element={<LecturerDashboard />} />

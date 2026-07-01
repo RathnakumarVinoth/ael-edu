@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import EmptyState from '../components/EmptyState'
+import { Plus, Search } from 'lucide-react'
+import Badge from '../components/Badge'
+import DashboardCard from '../components/DashboardCard'
+import DataTable from '../components/DataTable'
+import FormCard from '../components/FormCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import PageHeader from '../components/PageHeader'
 import api from '../services/api'
+import { difficultyVariant, displayValue, normalizeList } from '../utils/formatters'
 
 const initialForm = {
   topic_id: '',
@@ -25,23 +30,35 @@ export default function QuestionBank() {
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(initialForm)
   const [message, setMessage] = useState('')
+  const [messageType, setMessageType] = useState('info')
+  const [search, setSearch] = useState('')
+  const [difficulty, setDifficulty] = useState('all')
+  const [topicFilter, setTopicFilter] = useState('all')
 
-  const topicOptions = useMemo(() => topics.map((topic) => ({ value: topic.id, label: topic.topic_name })), [topics])
+  const topicMap = useMemo(() => {
+    const map = new Map()
+    topics.forEach((topic) => map.set(Number(topic.id), topic.topic_name))
+    return map
+  }, [topics])
+
+  const filteredQuestions = useMemo(() => {
+    return questions.filter((question) => {
+      const matchesText = question.question_text?.toLowerCase().includes(search.toLowerCase())
+      const matchesDifficulty = difficulty === 'all' || question.difficulty_level === difficulty
+      const matchesTopic = topicFilter === 'all' || Number(question.topic_id) === Number(topicFilter)
+      return matchesText && matchesDifficulty && matchesTopic
+    })
+  }, [questions, search, difficulty, topicFilter])
 
   useEffect(() => {
     const load = async () => {
-      try {
-        const [questionsResponse, topicsResponse] = await Promise.all([
-          api.get('/questions'),
-          api.get('/topics'),
-        ])
-        setQuestions(questionsResponse.data)
-        setTopics(topicsResponse.data)
-      } catch (error) {
-        console.error(error)
-      } finally {
-        setLoading(false)
-      }
+      const [questionsResponse, topicsResponse] = await Promise.allSettled([
+        api.get('/questions'),
+        api.get('/topics'),
+      ])
+      if (questionsResponse.status === 'fulfilled') setQuestions(normalizeList(questionsResponse.value.data))
+      if (topicsResponse.status === 'fulfilled') setTopics(normalizeList(topicsResponse.value.data))
+      setLoading(false)
     }
 
     load()
@@ -62,6 +79,7 @@ export default function QuestionBank() {
 
   const handleSubmit = async (event) => {
     event.preventDefault()
+    setMessage('')
     try {
       await api.post('/questions', {
         topic_id: Number(form.topic_id),
@@ -77,66 +95,81 @@ export default function QuestionBank() {
         solution: form.solution,
         hints: form.hints.filter((hint) => hint.hint_text.trim()),
       })
+      setMessageType('success')
       setMessage('Question added successfully.')
       const response = await api.get('/questions')
-      setQuestions(response.data)
+      setQuestions(normalizeList(response.data))
       setForm(initialForm)
-    } catch (error) {
+    } catch {
+      setMessageType('error')
       setMessage('Unable to add question right now.')
     }
   }
 
   return (
     <div className="page">
-      <PageHeader eyeliner="Assessment authoring" title="Question Bank" subtitle="Manage adaptive assessment content with a polished authoring workspace." />
+      <PageHeader
+        eyebrow="Assessment authoring"
+        title="Question Bank"
+        subtitle="Manage adaptive assessment content with a polished authoring workspace."
+      />
 
-      {message && <div className="card info-card">{message}</div>}
+      {message && <div className={`card ${messageType === 'success' ? 'success-card' : 'error-card'}`}>{message}</div>}
 
       <div className="content-grid two-col">
-        <div className="card">
-          <h3>Add new question</h3>
+        <FormCard title="Add Question" eyebrow="Structured item authoring">
           <form className="stack-form" onSubmit={handleSubmit}>
-            <label>
-              Topic
-              <select name="topic_id" value={form.topic_id} onChange={handleChange} required>
-                <option value="">Select topic</option>
-                {topicOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Difficulty level
-              <select name="difficulty_level" value={form.difficulty_level} onChange={handleChange}>
-                <option value="Easy">Easy</option>
-                <option value="Medium">Medium</option>
-                <option value="Hard">Hard</option>
-                <option value="Advanced">Advanced</option>
-              </select>
-            </label>
-            <label>
-              Question text
-              <textarea name="question_text" value={form.question_text} onChange={handleChange} rows="3" required />
-            </label>
-            <div className="inline-fields">
-              <label>Option A<input name="option_a" value={form.option_a} onChange={handleChange} /></label>
-              <label>Option B<input name="option_b" value={form.option_b} onChange={handleChange} /></label>
+            <div className="form-section">
+              <h4>Basic Details</h4>
+              <div className="inline-fields">
+                <label>
+                  Topic
+                  <select name="topic_id" value={form.topic_id} onChange={handleChange} required>
+                    <option value="">Select topic</option>
+                    {topics.map((topic) => (
+                      <option key={topic.id} value={topic.id}>{topic.topic_name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Difficulty level
+                  <select name="difficulty_level" value={form.difficulty_level} onChange={handleChange}>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
+                    <option value="Advanced">Advanced</option>
+                  </select>
+                </label>
+              </div>
+              <div className="inline-fields">
+                <label>Marks<input name="marks" type="number" min="0" value={form.marks} onChange={handleChange} /></label>
+                <label>Expected time (sec)<input name="expected_time" type="number" min="0" value={form.expected_time} onChange={handleChange} /></label>
+              </div>
             </div>
-            <div className="inline-fields">
-              <label>Option C<input name="option_c" value={form.option_c} onChange={handleChange} /></label>
-              <label>Option D<input name="option_d" value={form.option_d} onChange={handleChange} /></label>
+
+            <div className="form-section">
+              <h4>Question Text</h4>
+              <label>
+                Question
+                <textarea name="question_text" value={form.question_text} onChange={handleChange} rows="4" required />
+              </label>
             </div>
-            <label>Correct answer<input name="correct_answer" value={form.correct_answer} onChange={handleChange} placeholder="A / B / C / D" /></label>
-            <div className="inline-fields">
-              <label>Marks<input name="marks" type="number" value={form.marks} onChange={handleChange} /></label>
-              <label>Expected time (sec)<input name="expected_time" type="number" value={form.expected_time} onChange={handleChange} /></label>
+
+            <div className="form-section">
+              <h4>Answer Options</h4>
+              <div className="inline-fields">
+                <label>Option A<input name="option_a" value={form.option_a} onChange={handleChange} /></label>
+                <label>Option B<input name="option_b" value={form.option_b} onChange={handleChange} /></label>
+              </div>
+              <div className="inline-fields">
+                <label>Option C<input name="option_c" value={form.option_c} onChange={handleChange} /></label>
+                <label>Option D<input name="option_d" value={form.option_d} onChange={handleChange} /></label>
+              </div>
+              <label>Correct answer<input name="correct_answer" value={form.correct_answer} onChange={handleChange} placeholder="A / B / C / D or exact option text" /></label>
             </div>
-            <label>
-              Solution
-              <textarea name="solution" value={form.solution} onChange={handleChange} rows="2" />
-            </label>
-            <div>
-              <p className="muted">Hints</p>
+
+            <div className="form-section">
+              <h4>Hints</h4>
               {form.hints.map((hint, index) => (
                 <label key={hint.hint_level}>
                   Hint {hint.hint_level}
@@ -144,37 +177,63 @@ export default function QuestionBank() {
                 </label>
               ))}
             </div>
-            <button className="btn-primary" type="submit">Save question</button>
-          </form>
-        </div>
 
-        <div className="card">
-          <h3>Question library</h3>
-          {loading ? <LoadingSpinner label="Loading questions…" /> : questions.length > 0 ? (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Question</th>
-                    <th>Difficulty</th>
-                    <th>Topic</th>
-                    <th>Marks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {questions.map((question) => (
-                    <tr key={question.id}>
-                      <td>{question.question_text}</td>
-                      <td><span className={`badge ${question.difficulty_level === 'Advanced' ? 'badge-danger' : question.difficulty_level === 'Hard' ? 'badge-warning' : question.difficulty_level === 'Medium' ? 'badge-primary' : 'badge-success'}`}>{question.difficulty_level}</span></td>
-                      <td>{question.topic_id}</td>
-                      <td>{question.marks}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="form-section">
+              <h4>Solution</h4>
+              <label>
+                Solution
+                <textarea name="solution" value={form.solution} onChange={handleChange} rows="3" />
+              </label>
             </div>
-          ) : <EmptyState title="No questions yet" description="Create a new item to start building your assessment bank." />}
-        </div>
+
+            <button className="btn-primary" type="submit"><Plus size={18} /> Save question</button>
+          </form>
+        </FormCard>
+
+        <DashboardCard title="Question Library" action={<Badge variant="primary">{filteredQuestions.length} shown</Badge>}>
+          <div className="filter-row">
+            <label>
+              <span className="muted">Search</span>
+              <div style={{ position: 'relative' }}>
+                <Search size={17} style={{ position: 'absolute', left: 12, top: 13, color: 'var(--text-muted)' }} />
+                <input className="filter-input" style={{ paddingLeft: 38 }} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search question text" />
+              </div>
+            </label>
+            <label>
+              <span className="muted">Difficulty</span>
+              <select className="filter-input" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+                <option value="all">All</option>
+                <option value="Easy">Easy</option>
+                <option value="Medium">Medium</option>
+                <option value="Hard">Hard</option>
+                <option value="Advanced">Advanced</option>
+              </select>
+            </label>
+            <label>
+              <span className="muted">Topic</span>
+              <select className="filter-input" value={topicFilter} onChange={(event) => setTopicFilter(event.target.value)}>
+                <option value="all">All</option>
+                {topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.topic_name}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {loading ? <LoadingSpinner label="Loading questions..." /> : (
+            <DataTable
+              data={filteredQuestions}
+              emptyTitle="No questions found"
+              emptyDescription="Try a different search or add a new question."
+              columns={[
+                { key: 'question_text', header: 'Question', render: (question) => displayValue(question.question_text) },
+                { key: 'topic_id', header: 'Topic', render: (question) => topicMap.get(Number(question.topic_id)) || `Topic ${question.topic_id}` },
+                { key: 'difficulty_level', header: 'Difficulty', render: (question) => <Badge variant={difficultyVariant(question.difficulty_level)}>{question.difficulty_level}</Badge> },
+                { key: 'marks', header: 'Marks', render: (question) => displayValue(question.marks) },
+                { key: 'expected_time', header: 'Expected Time', render: (question) => `${displayValue(question.expected_time)} sec` },
+                { key: 'correct_answer', header: 'Correct Answer', render: (question) => displayValue(question.correct_answer) },
+              ]}
+            />
+          )}
+        </DashboardCard>
       </div>
     </div>
   )

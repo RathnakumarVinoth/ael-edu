@@ -1,37 +1,39 @@
 import { useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
+import Badge from '../components/Badge'
+import DashboardCard from '../components/DashboardCard'
+import DataTable from '../components/DataTable'
+import FormCard from '../components/FormCard'
+import LoadingSpinner from '../components/LoadingSpinner'
+import PageHeader from '../components/PageHeader'
 import api from '../services/api'
+import { displayValue, formatDate, normalizeList } from '../utils/formatters'
 
-const topicFormInitial = {
-  domain_id: '',
-  topic_name: '',
+const initialForm = {
+  course_name: '',
+  course_code: '',
   description: '',
-  learning_outcome: '',
 }
 
 export default function CourseManagement() {
   const [courses, setCourses] = useState([])
-  const [subjects, setSubjects] = useState([])
-  const [domains, setDomains] = useState([])
-  const [topics, setTopics] = useState([])
   const [loading, setLoading] = useState(true)
-  const [topicForm, setTopicForm] = useState(topicFormInitial)
+  const [form, setForm] = useState(initialForm)
   const [message, setMessage] = useState('')
+  const [messageType, setMessageType] = useState('info')
+
+  const loadCourses = async () => {
+    const response = await api.get('/courses')
+    setCourses(normalizeList(response.data))
+  }
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [coursesResponse, subjectsResponse, domainsResponse, topicsResponse] = await Promise.all([
-          api.get('/courses'),
-          api.get('/subjects'),
-          api.get('/domains'),
-          api.get('/topics'),
-        ])
-        setCourses(coursesResponse.data)
-        setSubjects(subjectsResponse.data)
-        setDomains(domainsResponse.data)
-        setTopics(topicsResponse.data)
-      } catch (error) {
-        console.error(error)
+        await loadCourses()
+      } catch {
+        setMessageType('error')
+        setMessage('Unable to load courses right now.')
       } finally {
         setLoading(false)
       }
@@ -40,121 +42,61 @@ export default function CourseManagement() {
     load()
   }, [])
 
-  const handleTopicChange = (event) => {
+  const handleChange = (event) => {
     const { name, value } = event.target
-    setTopicForm((current) => ({ ...current, [name]: value }))
+    setForm((current) => ({ ...current, [name]: value }))
   }
 
-  const handleTopicSubmit = async (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
+    setMessage('')
     try {
-      await api.post('/topics', {
-        domain_id: Number(topicForm.domain_id),
-        topic_name: topicForm.topic_name,
-        description: topicForm.description,
-        learning_outcome: topicForm.learning_outcome,
-      })
-      setMessage('Topic added successfully.')
-      const response = await api.get('/topics')
-      setTopics(response.data)
-      setTopicForm(topicFormInitial)
-    } catch (error) {
-      setMessage('Unable to add topic right now.')
+      await api.post('/courses', form)
+      setMessageType('success')
+      setMessage('Course added successfully.')
+      setForm(initialForm)
+      await loadCourses()
+    } catch {
+      setMessageType('error')
+      setMessage('Unable to add course right now.')
     }
   }
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Curriculum administration</p>
-          <h1>Course and topic management</h1>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Curriculum administration"
+        title="Course Management"
+        subtitle="Create and review course records used across adaptive quizzes, topics, and analytics."
+      />
 
-      {message && <div className="card info-card">{message}</div>}
+      {message && <div className={`card ${messageType === 'success' ? 'success-card' : 'error-card'}`}>{message}</div>}
 
       <div className="content-grid two-col">
-        <div className="card">
-          <h3>Add topic</h3>
-          <form className="stack-form" onSubmit={handleTopicSubmit}>
-            <label>
-              Domain ID
-              <input name="domain_id" type="number" value={topicForm.domain_id} onChange={handleTopicChange} required />
-            </label>
-            <label>
-              Topic name
-              <input name="topic_name" value={topicForm.topic_name} onChange={handleTopicChange} required />
-            </label>
-            <label>
-              Description
-              <textarea name="description" value={topicForm.description} onChange={handleTopicChange} rows="2" />
-            </label>
-            <label>
-              Learning outcome
-              <textarea name="learning_outcome" value={topicForm.learning_outcome} onChange={handleTopicChange} rows="2" />
-            </label>
-            <button className="btn-primary" type="submit">Save topic</button>
+        <FormCard title="Add Course" eyebrow="Course details">
+          <form className="stack-form" onSubmit={handleSubmit}>
+            <label>Course name<input name="course_name" value={form.course_name} onChange={handleChange} required /></label>
+            <label>Course code<input name="course_code" value={form.course_code} onChange={handleChange} required /></label>
+            <label>Description<textarea name="description" value={form.description} onChange={handleChange} rows="4" /></label>
+            <button className="btn-primary" type="submit"><Plus size={18} /> Save course</button>
           </form>
-        </div>
+        </FormCard>
 
-        <div className="card">
-          <h3>Curriculum overview</h3>
-          {loading ? <p>Loading curriculum…</p> : (
-            <div className="table-wrap">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Course</th>
-                    <th>Subject</th>
-                    <th>Domain</th>
-                    <th>Topic</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topics.map((topic) => (
-                    <tr key={topic.id}>
-                      <td>{courses.find((course) => course.id === (subjects.find((subject) => subject.id === domains.find((domain) => domain.id === topic.domain_id)?.subject_id)?.course_id))?.course_name || '—'}</td>
-                      <td>{subjects.find((subject) => subject.id === domains.find((domain) => domain.id === topic.domain_id)?.subject_id)?.subject_name || '—'}</td>
-                      <td>{domains.find((domain) => domain.id === topic.domain_id)?.domain_name || '—'}</td>
-                      <td>{topic.topic_name}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <DashboardCard title="Course Catalogue" action={<Badge variant="primary">{courses.length} courses</Badge>}>
+          {loading ? <LoadingSpinner label="Loading courses..." /> : (
+            <DataTable
+              data={courses}
+              emptyTitle="No courses yet"
+              emptyDescription="Add a course to begin structuring the learning content."
+              columns={[
+                { key: 'course_name', header: 'Course Name', render: (course) => <strong>{course.course_name}</strong> },
+                { key: 'course_code', header: 'Course Code', render: (course) => <Badge variant="neutral">{course.course_code}</Badge> },
+                { key: 'description', header: 'Description', render: (course) => displayValue(course.description) },
+                { key: 'created_at', header: 'Created At', render: (course) => formatDate(course.created_at) },
+              ]}
+            />
           )}
-        </div>
-      </div>
-
-      <div className="content-grid three-col">
-        <div className="card">
-          <h3>Courses</h3>
-          <div className="table-wrap">
-            <table className="table">
-              <thead><tr><th>Name</th><th>Code</th></tr></thead>
-              <tbody>{courses.map((course) => <tr key={course.id}><td>{course.course_name}</td><td>{course.course_code}</td></tr>)}</tbody>
-            </table>
-          </div>
-        </div>
-        <div className="card">
-          <h3>Subjects</h3>
-          <div className="table-wrap">
-            <table className="table">
-              <thead><tr><th>Name</th><th>Code</th></tr></thead>
-              <tbody>{subjects.map((subject) => <tr key={subject.id}><td>{subject.subject_name}</td><td>{subject.subject_code}</td></tr>)}</tbody>
-            </table>
-          </div>
-        </div>
-        <div className="card">
-          <h3>Domains</h3>
-          <div className="table-wrap">
-            <table className="table">
-              <thead><tr><th>Name</th><th>Description</th></tr></thead>
-              <tbody>{domains.map((domain) => <tr key={domain.id}><td>{domain.domain_name}</td><td>{domain.description}</td></tr>)}</tbody>
-            </table>
-          </div>
-        </div>
+        </DashboardCard>
       </div>
     </div>
   )
